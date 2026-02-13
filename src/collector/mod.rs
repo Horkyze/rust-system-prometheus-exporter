@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_format_float_decimal() {
-        assert_eq!(format_float(3.14), "3.14");
+        assert_eq!(format_float(3.125), "3.125");
     }
 
     #[test]
