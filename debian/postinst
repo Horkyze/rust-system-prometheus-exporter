@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+# Create system user if it doesn't exist
+if ! getent passwd sysmetrics >/dev/null 2>&1; then
+    adduser --system --group --no-create-home --shell /usr/sbin/nologin sysmetrics
+fi
+
+# Reload systemd and enable the service
+systemctl daemon-reload
+systemctl enable sysmetrics-rs.service
+
+echo "sysmetrics-rs has been installed."
+echo "Start the service with: sudo systemctl start sysmetrics-rs"
+echo "Configuration file: /etc/sysmetrics-rs/config.toml"

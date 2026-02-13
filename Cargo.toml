@@ -18,6 +18,24 @@ thiserror = "2"
 regex = "1"
 tower-http = { version = "0.6", features = ["trace"] }
 
+[package.metadata.deb]
+maintainer = "sysmetrics-rs maintainers"
+copyright = "MIT"
+extended-description = """\
+A lightweight, async Prometheus exporter that reads Linux system metrics \
+directly from /proc and /sys filesystems. Exposes CPU, memory, disk I/O, \
+and network metrics in Prometheus exposition format via HTTP on port 9101."""
+section = "net"
+priority = "optional"
+depends = "$auto, adduser"
+assets = [
+    ["target/release/sysmetrics-rs", "usr/bin/", "755"],
+    ["debian/config.toml", "etc/sysmetrics-rs/config.toml", "644"],
+]
+conf-files = ["/etc/sysmetrics-rs/config.toml"]
+maintainer-scripts = "debian/"
+systemd-units = { unit-name = "sysmetrics-rs", enable = false, start = false }
+
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }
 tokio-test = "0.4"

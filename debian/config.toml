@@ -1,0 +1,19 @@
+# sysmetrics-rs configuration file
+# See https://github.com/Horkyze/rust-system-prometheus-exporter for documentation
+
+[server]
+listen = "0.0.0.0:9101"
+metrics_path = "/metrics"
+log_format = "text"
+
+[collectors]
+cpu = true
+memory = true
+disk = true
+network = true
+
+[collectors.disk_config]
+exclude_pattern = "^(loop|ram|dm-)"
+
+[collectors.network_config]
+exclude_pattern = "^(lo|veth)"

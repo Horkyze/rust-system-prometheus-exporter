@@ -1,0 +1,29 @@
+[Unit]
+Description=sysmetrics-rs - Linux system metrics Prometheus exporter
+Documentation=https://github.com/Horkyze/rust-system-prometheus-exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sysmetrics
+Group=sysmetrics
+ExecStart=/usr/bin/sysmetrics-rs --config /etc/sysmetrics-rs/config.toml
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadOnlyPaths=/proc /sys
+MemoryDenyWriteExecute=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
