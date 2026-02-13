@@ -46,12 +46,18 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            deb: true
+            deb_arch: amd64
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            deb: false
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            deb: true
+            deb_arch: arm64
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
+            deb: false
 
     steps:
       - uses: actions/checkout@v4
@@ -88,11 +94,30 @@ jobs:
           tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
           shasum -a 256 "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.tar.gz.sha256"
 
+      - name: Build .deb package
+        if: matrix.deb
+        shell: bash
+        run: |
+          cargo install cargo-deb
+          # Copy the cross-compiled binary to target/release so cargo-deb can find it
+          mkdir -p target/release
+          cp "target/${{ matrix.target }}/release/sysmetrics-rs" target/release/
+          cargo deb --no-build --target ${{ matrix.target }}
+
+          # Move .deb to staging
+          cp target/${{ matrix.target }}/debian/*.deb staging/
+
+          # Create checksum for .deb
+          cd staging
+          for deb in *.deb; do
+            shasum -a 256 "$deb" > "${deb}.sha256"
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}
-          path: staging/*.tar.gz*
+          path: staging/*
           if-no-files-found: error
 
   # Create the GitHub release with all artifacts
@@ -130,7 +155,23 @@ jobs:
             echo ""
             echo "### Installation"
             echo ""
-            echo "Download the appropriate binary for your platform from the assets below."
+            echo "#### Debian/Ubuntu (.deb package)"
+            echo ""
+            echo '```bash'
+            echo "# Download and install (x86_64)"
+            echo "curl -LO https://github.com/\${GITHUB_REPOSITORY}/releases/download/${TAG}/sysmetrics-rs_${TAG#v}_amd64.deb"
+            echo "sudo dpkg -i sysmetrics-rs_${TAG#v}_amd64.deb"
+            echo ""
+            echo "# Start the service"
+            echo "sudo systemctl start sysmetrics-rs"
+            echo '```'
+            echo ""
+            echo "The .deb package installs:"
+            echo "- Binary: \`/usr/bin/sysmetrics-rs\`"
+            echo "- Config: \`/etc/sysmetrics-rs/config.toml\`"
+            echo "- Systemd service: \`sysmetrics-rs.service\`"
+            echo ""
+            echo "#### Binary archive"
             echo ""
             echo '```bash'
             echo "# Example for x86_64 Linux (glibc)"
@@ -155,12 +196,12 @@ jobs:
             echo ""
             echo "### Available targets"
             echo ""
-            echo "| Target | Description |"
-            echo "|--------|-------------|"
-            echo "| x86_64-unknown-linux-gnu | Linux x86_64 (glibc) |"
-            echo "| x86_64-unknown-linux-musl | Linux x86_64 (musl, static) |"
-            echo "| aarch64-unknown-linux-gnu | Linux ARM64 (glibc) |"
-            echo "| aarch64-unknown-linux-musl | Linux ARM64 (musl, static) |"
+            echo "| Target | Description | .deb |"
+            echo "|--------|-------------|------|"
+            echo "| x86_64-unknown-linux-gnu | Linux x86_64 (glibc) | Yes |"
+            echo "| x86_64-unknown-linux-musl | Linux x86_64 (musl, static) | No |"
+            echo "| aarch64-unknown-linux-gnu | Linux ARM64 (glibc) | Yes |"
+            echo "| aarch64-unknown-linux-musl | Linux ARM64 (musl, static) | No |"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
