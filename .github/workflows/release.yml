@@ -1,0 +1,216 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Run the full CI pipeline first to ensure quality
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
+  # Build release binaries for multiple targets
+  build:
+    name: Build (${{ matrix.target }})
+    needs: ci
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Create archive
+        shell: bash
+        run: |
+          BINARY_NAME="sysmetrics-rs"
+          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE_NAME="${BINARY_NAME}-${TAG}-${{ matrix.target }}"
+
+          mkdir -p "staging/${ARCHIVE_NAME}"
+          cp "target/${{ matrix.target }}/release/${BINARY_NAME}" "staging/${ARCHIVE_NAME}/"
+          cp README.md LICENSE* staging/${ARCHIVE_NAME}/ 2>/dev/null || true
+
+          cd staging
+          tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+          shasum -a 256 "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.tar.gz.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: staging/*.tar.gz*
+          if-no-files-found: error
+
+  # Create the GitHub release with all artifacts
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Try to get previous tag for changelog
+          PREV_TAG=$(git tag --sort=-version:refname | head -2 | tail -1) || true
+
+          {
+            echo "notes<<EOF"
+            echo "## sysmetrics-rs ${TAG}"
+            echo ""
+            echo "### Installation"
+            echo ""
+            echo "Download the appropriate binary for your platform from the assets below."
+            echo ""
+            echo '```bash'
+            echo "# Example for x86_64 Linux (glibc)"
+            echo "curl -LO https://github.com/\${GITHUB_REPOSITORY}/releases/download/${TAG}/sysmetrics-rs-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+            echo "tar xzf sysmetrics-rs-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+            echo "sudo mv sysmetrics-rs-${TAG}-x86_64-unknown-linux-gnu/sysmetrics-rs /usr/local/bin/"
+            echo '```'
+            echo ""
+            echo "### Verify checksums"
+            echo ""
+            echo '```bash'
+            echo "sha256sum -c sysmetrics-rs-${TAG}-x86_64-unknown-linux-gnu.tar.gz.sha256"
+            echo '```'
+            echo ""
+            if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
+              echo "### Changes since ${PREV_TAG}"
+              echo ""
+              git log "${PREV_TAG}..${TAG}" --oneline --no-merges 2>/dev/null || echo "First release"
+            else
+              echo "### Initial Release"
+            fi
+            echo ""
+            echo "### Available targets"
+            echo ""
+            echo "| Target | Description |"
+            echo "|--------|-------------|"
+            echo "| x86_64-unknown-linux-gnu | Linux x86_64 (glibc) |"
+            echo "| x86_64-unknown-linux-musl | Linux x86_64 (musl, static) |"
+            echo "| aarch64-unknown-linux-gnu | Linux ARM64 (glibc) |"
+            echo "| aarch64-unknown-linux-musl | Linux ARM64 (musl, static) |"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.notes.outputs.notes }}
+          files: artifacts/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build and push Docker image
+  docker:
+    name: Docker Image
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
