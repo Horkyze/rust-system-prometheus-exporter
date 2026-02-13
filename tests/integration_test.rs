@@ -32,7 +32,10 @@ async fn start_server(port: u16) -> tokio::task::JoinHandle<()> {
     // Wait for the server to start
     for _ in 0..50 {
         sleep(Duration::from_millis(200)).await;
-        if let Ok(_) = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await {
+        if tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+            .await
+            .is_ok()
+        {
             return handle;
         }
     }
@@ -46,7 +49,7 @@ async fn test_health_endpoint() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(&format!("http://127.0.0.1:{}/health", port))
+        .get(format!("http://127.0.0.1:{}/health", port))
         .send()
         .await;
 
@@ -64,7 +67,7 @@ async fn test_metrics_endpoint() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(&format!("http://127.0.0.1:{}/metrics", port))
+        .get(format!("http://127.0.0.1:{}/metrics", port))
         .send()
         .await;
 
@@ -132,7 +135,7 @@ async fn test_index_endpoint() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(&format!("http://127.0.0.1:{}/", port))
+        .get(format!("http://127.0.0.1:{}/", port))
         .send()
         .await;
 
